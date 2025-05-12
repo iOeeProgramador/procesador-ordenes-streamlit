@@ -3,6 +3,7 @@ import pandas as pd
 import zipfile
 import io
 import os
+import json
 from datetime import datetime
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
@@ -10,25 +11,44 @@ from pydrive.drive import GoogleDrive
 st.set_page_config(layout="wide")
 st.title("Procesador de archivos MIA")
 
-# Autenticación con Google Drive
+# Autenticación con Google Drive usando secrets y carpeta específica
+FOLDER_ID = "TU_FOLDER_ID_AQUI"  # Reemplaza esto con el ID real de la carpeta de Drive
+
 def autenticar_drive():
     gauth = GoogleAuth()
-    gauth.LocalWebserverAuth()  # Abre navegador para autenticación por única vez
+    credentials_dict = {
+        "client_config_backend": "settings",
+        "client_config": {
+            "client_id": st.secrets["google_drive"]["client_id"],
+            "client_secret": st.secrets["google_drive"]["client_secret"],
+            "auth_uri": st.secrets["google_drive"]["auth_uri"],
+            "token_uri": st.secrets["google_drive"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["google_drive"]["auth_provider_x509_cert_url"],
+            "redirect_uris": st.secrets["google_drive"]["redirect_uris"]
+        }
+    }
+    gauth.settings = credentials_dict
+    gauth.LocalWebserverAuth()
     return GoogleDrive(gauth)
 
 def descargar_ultimo_archivo(drive, nombre_archivo):
-    file_list = drive.ListFile({'q': f"title='{nombre_archivo}' and trashed=false"}).GetList()
+    query = f"title='{nombre_archivo}' and trashed=false and '{FOLDER_ID}' in parents"
+    file_list = drive.ListFile({'q': query}).GetList()
     if file_list:
         archivo = file_list[0]
-        contenido = archivo.GetContentString()
-        return pd.read_excel(io.BytesIO(contenido.encode('utf-8')))
+        archivo.GetContentFile(nombre_archivo)
+        return pd.read_excel(nombre_archivo)
     return None
 
 def subir_archivo(drive, nombre_local, nombre_remoto):
-    file_list = drive.ListFile({'q': f"title='{nombre_remoto}' and trashed=false"}).GetList()
-    if file_list:
-        file_list[0].Delete()
-    file_drive = drive.CreateFile({'title': nombre_remoto})
+    query = f"title='{nombre_remoto}' and trashed=false and '{FOLDER_ID}' in parents"
+    file_list = drive.ListFile({'q': query}).GetList()
+    for file in file_list:
+        file.Delete()
+    file_drive = drive.CreateFile({
+        'title': nombre_remoto,
+        'parents': [{"id": FOLDER_ID}]
+    })
     file_drive.SetContentFile(nombre_local)
     file_drive.Upload()
 
@@ -38,13 +58,10 @@ drive_filename = "DatosCombinados.xlsx"
 
 # Mostrar último archivo si existe
 st.write("📂 Cargando archivo desde Google Drive...")
-contenido_drive = None
+df_combinado = None
 try:
-    file_list = drive.ListFile({'q': f"title='{drive_filename}' and trashed=false"}).GetList()
-    if file_list:
-        file = file_list[0]
-        file.GetContentFile(drive_filename)
-        df_combinado = pd.read_excel(drive_filename)
+    df_combinado = descargar_ultimo_archivo(drive, drive_filename)
+    if df_combinado is not None:
         st.success("Archivo DatosCombinados.xlsx cargado desde Google Drive")
         st.dataframe(df_combinado, use_container_width=True)
     else:
@@ -52,7 +69,7 @@ try:
 except Exception as e:
     st.error(f"Error al leer desde Google Drive: {e}")
 
-# Opción para subir nuevo ZIP
+# Opción para subir nuevo ZIP o generar libros por responsable
 tabs = st.tabs(["Actualizar Datos", "Generar Libros por Responsable"])
 
 with tabs[0]:
@@ -70,13 +87,13 @@ with tabs[0]:
                     today = datetime.today()
                     df_ordenes.insert(0, "CONTROL_DIAS", df_ordenes["LRDTE_ORDENES"].apply(lambda x: (datetime.strptime(str(int(x)), "%Y%m%d") - today).days))
 
+                df_combinado = df_ordenes.copy()
+
                 if "INVENTARIO.xlsx" in file_dict:
                     df_inventario = pd.read_excel(file_dict["INVENTARIO.xlsx"])
                     df_inventario.columns = [f"{col}_INVENTARIO" for col in df_inventario.columns]
                     df_inventario_unique = df_inventario.drop_duplicates(subset=["Cod. Producto_INVENTARIO"])
-                    df_combinado = pd.merge(df_ordenes, df_inventario_unique, left_on="LPROD_ORDENES", right_on="Cod. Producto_INVENTARIO", how="left")
-                else:
-                    df_combinado = df_ordenes
+                    df_combinado = pd.merge(df_combinado, df_inventario_unique, left_on="LPROD_ORDENES", right_on="Cod. Producto_INVENTARIO", how="left")
 
                 if "ESTADO.xlsx" in file_dict:
                     df_estado = pd.read_excel(file_dict["ESTADO.xlsx"])
@@ -104,13 +121,12 @@ with tabs[0]:
                 st.success("Datos combinados generados")
                 st.dataframe(df_combinado, use_container_width=True)
 
-                # Guardar archivo generado y subir a Google Drive
                 df_combinado.to_excel(drive_filename, index=False)
                 subir_archivo(drive, drive_filename, drive_filename)
                 st.success("Archivo actualizado en Google Drive")
 
 with tabs[1]:
-    if 'df_combinado' in locals():
+    if df_combinado is not None and "RESPONSABLE_GESTION" in df_combinado.columns:
         columnas_exportar = [
             "CONTROL_DIAS", "CNME_ORDENES", "HROUT_ORDENES", "HSTAT_ORDENES", "LODTE_ORDENES", "LRDTE_ORDENES",
             "LORD_ORDENES", "HCPO_ORDENES", "LLINE_ORDENES", "LSTAT_ORDENES", "LPROD_ORDENES", "LDESC_ORDENES",
@@ -119,25 +135,24 @@ with tabs[1]:
             "ESTADO_ESTADO", "OBSERVACION_ESTADO", "VALOR_PRECIOS", "On Hand_PRECIOS"
         ]
 
-        if "RESPONSABLE_GESTION" in df_combinado.columns:
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-                for responsable in df_combinado["RESPONSABLE_GESTION"].dropna().unique():
-                    df_responsable = df_combinado[df_combinado["RESPONSABLE_GESTION"] == responsable][columnas_exportar].copy()
-                    df_responsable["VALOR_TOTAL"] = df_responsable.apply(
-                        lambda row: row["LQORD_ORDENES"] * row["VALOR_PRECIOS"] if pd.notna(row["LQORD_ORDENES"]) and pd.notna(row["VALOR_PRECIOS"]) else "",
-                        axis=1
-                    )
-                    temp_buffer = io.BytesIO()
-                    with pd.ExcelWriter(temp_buffer, engine="xlsxwriter") as writer:
-                        df_responsable.to_excel(writer, index=False, sheet_name="Datos")
-                    temp_buffer.seek(0)
-                    zip_file.writestr(f"{responsable}.xlsx", temp_buffer.read())
-            zip_buffer.seek(0)
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+            for responsable in df_combinado["RESPONSABLE_GESTION"].dropna().unique():
+                df_responsable = df_combinado[df_combinado["RESPONSABLE_GESTION"] == responsable][columnas_exportar].copy()
+                df_responsable["VALOR_TOTAL"] = df_responsable.apply(
+                    lambda row: row["LQORD_ORDENES"] * row["VALOR_PRECIOS"] if pd.notna(row["LQORD_ORDENES"]) and pd.notna(row["VALOR_PRECIOS"]) else "",
+                    axis=1
+                )
+                temp_buffer = io.BytesIO()
+                with pd.ExcelWriter(temp_buffer, engine="xlsxwriter") as writer:
+                    df_responsable.to_excel(writer, index=False, sheet_name="Datos")
+                temp_buffer.seek(0)
+                zip_file.writestr(f"{responsable}.xlsx", temp_buffer.read())
+        zip_buffer.seek(0)
 
-            st.download_button(
-                label="Descargar todos los libros por Responsable (ZIP)",
-                data=zip_buffer,
-                file_name="Exportacion_Responsables.zip",
-                mime="application/zip"
-            )
+        st.download_button(
+            label="Descargar todos los libros por Responsable (ZIP)",
+            data=zip_buffer,
+            file_name="Exportacion_Responsables.zip",
+            mime="application/zip"
+        )
