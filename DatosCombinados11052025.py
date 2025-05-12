@@ -1,3 +1,6 @@
+import os
+DB_PATH = "datos_combinados.db"
+
 if os.path.exists(DB_PATH):
     st.caption("Base de datos SQLite detectada: se omitirá el cargador ZIP hasta usar 'Actualizar Datos'.")
 
