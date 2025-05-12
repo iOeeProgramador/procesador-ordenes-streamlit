@@ -1,4 +1,18 @@
 import os
+import sqlite3
+
+def guardar_en_sqlite(df):
+    conn = sqlite3.connect(DB_PATH)
+    df.to_sql("datos_combinados", conn, if_exists="replace", index=False)
+    conn.close()
+
+def leer_desde_sqlite():
+    if os.path.exists(DB_PATH):
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_sql("SELECT * FROM datos_combinados", conn)
+        conn.close()
+        return df
+    return None
 DB_PATH = "datos_combinados.db"
 
 if os.path.exists(DB_PATH):
