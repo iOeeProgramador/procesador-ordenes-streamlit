@@ -51,7 +51,7 @@ def subir_archivo(service, nombre_local, nombre_remoto, folder_id):
     for f in results.get("files", []):
         service.files().delete(fileId=f['id']).execute()
     file_metadata = {"name": nombre_remoto, "parents": [folder_id]}
-    media = MediaFileUpload(nombre_local, resumable=True)
+    media = MediaFileUpload(nombre_local, mimetype="application/zip", resumable=True)
     service.files().create(body=file_metadata, media_body=media, fields="id").execute()
 
 # Conectar
