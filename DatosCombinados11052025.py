@@ -18,10 +18,6 @@ FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"  # Carpeta para lib
 def autenticar_drive():
     import yaml
     settings_path = "settings.yaml"
-    config = {
-        "client_config_backend": "settings",
-        "client_config_file": settings_path
-    }
     client_config = {
         "client_id": st.secrets["google_drive"]["client_id"],
         "client_secret": st.secrets["google_drive"]["client_secret"],
@@ -32,7 +28,8 @@ def autenticar_drive():
     }
     with open(settings_path, "w") as f:
         yaml.dump({"installed": client_config}, f)
-    gauth = GoogleAuth(settings_file=settings_path)
+    gauth = GoogleAuth()
+    gauth.LoadClientConfigFile(settings_path)
     gauth.LocalWebserverAuth()
     return GoogleDrive(gauth)
 
