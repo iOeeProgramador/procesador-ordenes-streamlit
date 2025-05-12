@@ -3,74 +3,34 @@ import pandas as pd
 import zipfile
 import io
 import os
+import sqlite3
 from datetime import datetime
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 st.set_page_config(layout="wide")
 st.title("Procesador de archivos MIA")
 
-FOLDER_ID_DATOS = "1yeUnQepazTxoxPDu3NqLbZtu-_EL1AoA"
-FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"
+DB_PATH = "datos_combinados.db"
 
-def build_service():
-    uploaded_json = st.file_uploader("🔐 Sube tu archivo de credenciales JSON", type="json")
-    if uploaded_json is not None:
-        temp_path = "temp_credentials.json"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_json.getbuffer())
-        credentials = service_account.Credentials.from_service_account_file(
-            temp_path, scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=credentials)
-    else:
-        st.stop()
+def guardar_en_sqlite(df):
+    conn = sqlite3.connect(DB_PATH)
+    df.to_sql("datos_combinados", conn, if_exists="replace", index=False)
+    conn.close()
 
-def descargar_ultimo_archivo(service, file_name):
-    results = service.files().list(q=f"name='{file_name}' and '{FOLDER_ID_DATOS}' in parents and trashed=false",
-                                   spaces="drive",
-                                   fields="files(id, name)").execute()
-    items = results.get("files", [])
-    if not items:
-        return None
-    file_id = items[0]["id"]
-    request = service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while done is False:
-        status, done = downloader.next_chunk()
-    fh.seek(0)
-    return pd.read_excel(fh)
+def leer_desde_sqlite():
+    if os.path.exists(DB_PATH):
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_sql("SELECT * FROM datos_combinados", conn)
+        conn.close()
+        return df
+    return None
 
-def subir_archivo(service, nombre_local, nombre_remoto, folder_id):
-    import mimetypes
-    results = service.files().list(q=f"name='{nombre_remoto}' and '{folder_id}' in parents and trashed=false",
-                                   spaces="drive",
-                                   fields="files(id)").execute()
-    for f in results.get("files", []):
-        service.files().delete(fileId=f['id']).execute()
-    file_metadata = {"name": nombre_remoto, "parents": [folder_id]}
-    mime_type, _ = mimetypes.guess_type(nombre_local)
-    media = MediaFileUpload(nombre_local, mimetype=mime_type, resumable=False)
-    service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-
-# Conectar
-service = build_service()
-drive_filename = "DatosCombinados.xlsx"
-
-st.write("📂 Cargando archivo desde Google Drive...")
-df_combinado = None
-try:
-    df_combinado = descargar_ultimo_archivo(service, drive_filename)
-    if df_combinado is not None:
-        st.success("Archivo DatosCombinados.xlsx cargado desde Google Drive")
-        st.dataframe(df_combinado, use_container_width=True)
-    else:
-        st.info("No se encontró el archivo en Google Drive.")
-except Exception as e:
-    st.error(f"Error al leer desde Google Drive: {e}")
+# Leer datos previos si existen
+df_combinado = leer_desde_sqlite()
+if df_combinado is not None:
+    st.success("Datos cargados desde base local SQLite")
+    st.dataframe(df_combinado, use_container_width=True)
+else:
+    st.info("No se encontraron datos previos guardados.")
 
 # Tabs para cargar ZIP o exportar por responsable
 tabs = st.tabs(["Actualizar Datos", "Generar Libros por Responsable"])
@@ -124,9 +84,8 @@ with tabs[0]:
                 st.success("Datos combinados generados")
                 st.dataframe(df_combinado, use_container_width=True)
 
-                df_combinado.to_excel(drive_filename, index=False)
-                subir_archivo(service, drive_filename, drive_filename, FOLDER_ID_DATOS)
-                st.success("Archivo actualizado en Google Drive")
+                guardar_en_sqlite(df_combinado)
+                st.success("Datos guardados localmente en base SQLite")
 
 with tabs[1]:
     if df_combinado is not None and "RESPONSABLE_GESTION" in df_combinado.columns:
@@ -162,10 +121,3 @@ with tabs[1]:
             file_name=zip_filename,
             mime="application/zip"
         )
-
-        with open(zip_filename, "wb") as f:
-            f.write(zip_buffer.getvalue())
-        subir_archivo(service, zip_filename, zip_filename, FOLDER_ID_RESPONSABLES)
-        st.success("ZIP de responsables subido a Google Drive")
-# Solo actualiza las funciones subir_archivo(drive, ...) por subir_archivo(service, ...)
-# y elimina cualquier referencia a PyDrive
