@@ -161,9 +161,10 @@ with tabs[1]:
             mime="application/zip"
         )
 
-        with open(zip_filename, "wb") as f:
+        temp_path = f"/tmp/{zip_filename}"
+        with open(temp_path, "wb") as f:
             f.write(zip_buffer.getvalue())
-        subir_archivo(service, zip_filename, zip_filename, FOLDER_ID_RESPONSABLES)
+        subir_archivo(service, temp_path, zip_filename, FOLDER_ID_RESPONSABLES)
         st.success("ZIP de responsables subido a Google Drive")
 # Solo actualiza las funciones subir_archivo(drive, ...) por subir_archivo(service, ...)
 # y elimina cualquier referencia a PyDrive
