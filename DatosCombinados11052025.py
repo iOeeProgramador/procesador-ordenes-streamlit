@@ -1,30 +1,6 @@
-import streamlit as st
-import pandas as pd
-import zipfile
-import io
-import os
-import sqlite3
-from datetime import datetime
+if os.path.exists(DB_PATH):
+    st.caption("Base de datos SQLite detectada: se omitirá el cargador ZIP hasta usar 'Actualizar Datos'.")
 
-st.set_page_config(layout="wide")
-st.title("Procesador de archivos MIA")
-
-DB_PATH = "datos_combinados.db"
-
-def guardar_en_sqlite(df):
-    conn = sqlite3.connect(DB_PATH)
-    df.to_sql("datos_combinados", conn, if_exists="replace", index=False)
-    conn.close()
-
-def leer_desde_sqlite():
-    if os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql("SELECT * FROM datos_combinados", conn)
-        conn.close()
-        return df
-    return None
-
-# Leer datos previos si existen
 df_combinado = leer_desde_sqlite()
 if df_combinado is not None:
     st.success("Datos cargados desde base local SQLite")
@@ -36,7 +12,8 @@ else:
 tabs = st.tabs(["Actualizar Datos", "Generar Libros por Responsable"])
 
 with tabs[0]:
-    uploaded_file = st.file_uploader("Carga tu archivo ZIP con los libros de Excel", type="zip")
+    mostrar_uploader = st.button("Actualizar Datos desde ZIP")
+    uploaded_file = st.file_uploader("Carga tu archivo ZIP con los libros de Excel", type="zip") if mostrar_uploader else None
     if uploaded_file is not None:
         with zipfile.ZipFile(uploaded_file) as z:
             expected_files = ["ORDENES.xlsx", "INVENTARIO.xlsx", "ESTADO.xlsx", "PRECIOS.xlsx", "GESTION.xlsx"]
@@ -88,6 +65,9 @@ with tabs[0]:
                 st.success("Datos guardados localmente en base SQLite")
 
 with tabs[1]:
+    if os.path.exists(DB_PATH):
+        with open(DB_PATH, "rb") as f:
+            st.download_button("📥 Descargar base SQLite actual (.db)", f, file_name="datos_combinados.db")
     if df_combinado is not None and "RESPONSABLE_GESTION" in df_combinado.columns:
         columnas_exportar = [
             "CONTROL_DIAS", "CNME_ORDENES", "HROUT_ORDENES", "HSTAT_ORDENES", "LODTE_ORDENES", "LRDTE_ORDENES",
