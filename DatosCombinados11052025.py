@@ -16,19 +16,23 @@ FOLDER_ID_DATOS = "1yeUnQepazTxoxPDu3NqLbZtu-_EL1AoA"  # Carpeta para DatosCombi
 FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"  # Carpeta para libros por Responsable
 
 def autenticar_drive():
-    gauth = GoogleAuth()
-    credentials_dict = {
+    import yaml
+    settings_path = "settings.yaml"
+    config = {
         "client_config_backend": "settings",
-        "client_config": {
-            "client_id": st.secrets["google_drive"]["client_id"],
-            "client_secret": st.secrets["google_drive"]["client_secret"],
-            "auth_uri": st.secrets["google_drive"]["auth_uri"],
-            "token_uri": st.secrets["google_drive"]["token_uri"],
-            "auth_provider_x509_cert_url": st.secrets["google_drive"]["auth_provider_x509_cert_url"],
-            "redirect_uris": st.secrets["google_drive"]["redirect_uris"]
-        }
+        "client_config_file": settings_path
     }
-    gauth.settings = credentials_dict
+    client_config = {
+        "client_id": st.secrets["google_drive"]["client_id"],
+        "client_secret": st.secrets["google_drive"]["client_secret"],
+        "auth_uri": st.secrets["google_drive"]["auth_uri"],
+        "token_uri": st.secrets["google_drive"]["token_uri"],
+        "auth_provider_x509_cert_url": st.secrets["google_drive"]["auth_provider_x509_cert_url"],
+        "redirect_uris": st.secrets["google_drive"]["redirect_uris"]
+    }
+    with open(settings_path, "w") as f:
+        yaml.dump({"installed": client_config}, f)
+    gauth = GoogleAuth(settings_file=settings_path)
     gauth.LocalWebserverAuth()
     return GoogleDrive(gauth)
 
