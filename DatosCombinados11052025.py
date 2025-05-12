@@ -26,8 +26,6 @@ def build_service():
         return build("drive", "v3", credentials=credentials)
     else:
         st.stop()
-    else:
-        st.stop()
 
 def descargar_ultimo_archivo(service, file_name):
     results = service.files().list(q=f"name='{file_name}' and '{FOLDER_ID_DATOS}' in parents and trashed=false",
