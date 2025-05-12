@@ -3,66 +3,58 @@ import pandas as pd
 import zipfile
 import io
 import os
-import json
 from datetime import datetime
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 st.set_page_config(layout="wide")
 st.title("Procesador de archivos MIA")
 
-# Autenticación con Google Drive usando secrets y carpetas específicas
-FOLDER_ID_DATOS = "1yeUnQepazTxoxPDu3NqLbZtu-_EL1AoA"  # Carpeta para DatosCombinados.xlsx
-FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"  # Carpeta para libros por Responsable
+FOLDER_ID_DATOS = "1yeUnQepazTxoxPDu3NqLbZtu-_EL1AoA"
+FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"
 
-def autenticar_drive():
-    import yaml
-    settings_path = "settings.yaml"
-    client_config = {
-        "client_id": st.secrets["google_drive"]["client_id"],
-        "client_secret": st.secrets["google_drive"]["client_secret"],
-        "auth_uri": st.secrets["google_drive"]["auth_uri"],
-        "token_uri": st.secrets["google_drive"]["token_uri"],
-        "auth_provider_x509_cert_url": st.secrets["google_drive"]["auth_provider_x509_cert_url"],
-        "redirect_uris": st.secrets["google_drive"]["redirect_uris"]
-    }
-    with open(settings_path, "w") as f:
-        yaml.dump({"installed": client_config}, f)
-    gauth = GoogleAuth()
-    gauth.LoadClientConfigFile(settings_path)
-    gauth.LocalWebserverAuth()
-    return GoogleDrive(gauth)
+def build_service():
+    credentials = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=credentials)
 
-def descargar_ultimo_archivo(drive, nombre_archivo):
-    query = f"title='{nombre_archivo}' and trashed=false and '{FOLDER_ID_DATOS}' in parents"
-    file_list = drive.ListFile({'q': query}).GetList()
-    if file_list:
-        archivo = file_list[0]
-        archivo.GetContentFile(nombre_archivo)
-        return pd.read_excel(nombre_archivo)
-    return None
+def descargar_ultimo_archivo(service, file_name):
+    results = service.files().list(q=f"name='{file_name}' and '{FOLDER_ID_DATOS}' in parents and trashed=false",
+                                   spaces="drive",
+                                   fields="files(id, name)").execute()
+    items = results.get("files", [])
+    if not items:
+        return None
+    file_id = items[0]["id"]
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while done is False:
+        status, done = downloader.next_chunk()
+    fh.seek(0)
+    return pd.read_excel(fh)
 
-def subir_archivo(drive, nombre_local, nombre_remoto, folder_id):
-    query = f"title='{nombre_remoto}' and trashed=false and '{folder_id}' in parents"
-    file_list = drive.ListFile({'q': query}).GetList()
-    for file in file_list:
-        file.Delete()
-    file_drive = drive.CreateFile({
-        'title': nombre_remoto,
-        'parents': [{"id": folder_id}]
-    })
-    file_drive.SetContentFile(nombre_local)
-    file_drive.Upload()
+def subir_archivo(service, nombre_local, nombre_remoto, folder_id):
+    results = service.files().list(q=f"name='{nombre_remoto}' and '{folder_id}' in parents and trashed=false",
+                                   spaces="drive",
+                                   fields="files(id)").execute()
+    for f in results.get("files", []):
+        service.files().delete(fileId=f['id']).execute()
+    file_metadata = {"name": nombre_remoto, "parents": [folder_id]}
+    media = MediaFileUpload(nombre_local, resumable=True)
+    service.files().create(body=file_metadata, media_body=media, fields="id").execute()
 
-# Conexión con Google Drive
-drive = autenticar_drive()
+# Conectar
+service = build_service()
 drive_filename = "DatosCombinados.xlsx"
 
-# Mostrar último archivo si existe
 st.write("📂 Cargando archivo desde Google Drive...")
 df_combinado = None
 try:
-    df_combinado = descargar_ultimo_archivo(drive, drive_filename)
+    df_combinado = descargar_ultimo_archivo(service, drive_filename)
     if df_combinado is not None:
         st.success("Archivo DatosCombinados.xlsx cargado desde Google Drive")
         st.dataframe(df_combinado, use_container_width=True)
@@ -71,7 +63,7 @@ try:
 except Exception as e:
     st.error(f"Error al leer desde Google Drive: {e}")
 
-# Opción para subir nuevo ZIP o generar libros por responsable
+# Tabs para cargar ZIP o exportar por responsable
 tabs = st.tabs(["Actualizar Datos", "Generar Libros por Responsable"])
 
 with tabs[0]:
@@ -124,7 +116,7 @@ with tabs[0]:
                 st.dataframe(df_combinado, use_container_width=True)
 
                 df_combinado.to_excel(drive_filename, index=False)
-                subir_archivo(drive, drive_filename, drive_filename, FOLDER_ID_DATOS)
+                subir_archivo(service, drive_filename, drive_filename, FOLDER_ID_DATOS)
                 st.success("Archivo actualizado en Google Drive")
 
 with tabs[1]:
@@ -162,8 +154,9 @@ with tabs[1]:
             mime="application/zip"
         )
 
-        # Subir también al Drive en carpeta específica
         with open(zip_filename, "wb") as f:
             f.write(zip_buffer.getvalue())
-        subir_archivo(drive, zip_filename, zip_filename, FOLDER_ID_RESPONSABLES)
+        subir_archivo(service, zip_filename, zip_filename, FOLDER_ID_RESPONSABLES)
         st.success("ZIP de responsables subido a Google Drive")
+# Solo actualiza las funciones subir_archivo(drive, ...) por subir_archivo(service, ...)
+# y elimina cualquier referencia a PyDrive
