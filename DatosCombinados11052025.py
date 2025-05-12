@@ -11,8 +11,9 @@ from pydrive.drive import GoogleDrive
 st.set_page_config(layout="wide")
 st.title("Procesador de archivos MIA")
 
-# Autenticación con Google Drive usando secrets y carpeta específica
-FOLDER_ID = "TU_FOLDER_ID_AQUI"  # Reemplaza esto con el ID real de la carpeta de Drive
+# Autenticación con Google Drive usando secrets y carpetas específicas
+FOLDER_ID_DATOS = "TU_FOLDER_ID_DATOS"  # Carpeta para DatosCombinados.xlsx
+FOLDER_ID_RESPONSABLES = "TU_FOLDER_ID_RESPONSABLES"  # Carpeta para libros por Responsable
 
 def autenticar_drive():
     gauth = GoogleAuth()
@@ -32,7 +33,7 @@ def autenticar_drive():
     return GoogleDrive(gauth)
 
 def descargar_ultimo_archivo(drive, nombre_archivo):
-    query = f"title='{nombre_archivo}' and trashed=false and '{FOLDER_ID}' in parents"
+    query = f"title='{nombre_archivo}' and trashed=false and '{FOLDER_ID_DATOS}' in parents"
     file_list = drive.ListFile({'q': query}).GetList()
     if file_list:
         archivo = file_list[0]
@@ -40,14 +41,14 @@ def descargar_ultimo_archivo(drive, nombre_archivo):
         return pd.read_excel(nombre_archivo)
     return None
 
-def subir_archivo(drive, nombre_local, nombre_remoto):
-    query = f"title='{nombre_remoto}' and trashed=false and '{FOLDER_ID}' in parents"
+def subir_archivo(drive, nombre_local, nombre_remoto, folder_id):
+    query = f"title='{nombre_remoto}' and trashed=false and '{folder_id}' in parents"
     file_list = drive.ListFile({'q': query}).GetList()
     for file in file_list:
         file.Delete()
     file_drive = drive.CreateFile({
         'title': nombre_remoto,
-        'parents': [{"id": FOLDER_ID}]
+        'parents': [{"id": folder_id}]
     })
     file_drive.SetContentFile(nombre_local)
     file_drive.Upload()
@@ -122,7 +123,7 @@ with tabs[0]:
                 st.dataframe(df_combinado, use_container_width=True)
 
                 df_combinado.to_excel(drive_filename, index=False)
-                subir_archivo(drive, drive_filename, drive_filename)
+                subir_archivo(drive, drive_filename, drive_filename, FOLDER_ID_DATOS)
                 st.success("Archivo actualizado en Google Drive")
 
 with tabs[1]:
@@ -136,6 +137,9 @@ with tabs[1]:
         ]
 
         zip_buffer = io.BytesIO()
+        fecha_actual = datetime.today().strftime("%Y%m%d")
+        zip_filename = f"Exportacion_Responsables_{fecha_actual}.zip"
+
         with zipfile.ZipFile(zip_buffer, "w") as zip_file:
             for responsable in df_combinado["RESPONSABLE_GESTION"].dropna().unique():
                 df_responsable = df_combinado[df_combinado["RESPONSABLE_GESTION"] == responsable][columnas_exportar].copy()
@@ -153,6 +157,12 @@ with tabs[1]:
         st.download_button(
             label="Descargar todos los libros por Responsable (ZIP)",
             data=zip_buffer,
-            file_name="Exportacion_Responsables.zip",
+            file_name=zip_filename,
             mime="application/zip"
         )
+
+        # Subir también al Drive en carpeta específica
+        with open(zip_filename, "wb") as f:
+            f.write(zip_buffer.getvalue())
+        subir_archivo(drive, zip_filename, zip_filename, FOLDER_ID_RESPONSABLES)
+        st.success("ZIP de responsables subido a Google Drive")
