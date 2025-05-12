@@ -17,10 +17,15 @@ FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"
 def build_service():
     uploaded_json = st.file_uploader("🔐 Sube tu archivo de credenciales JSON", type="json")
     if uploaded_json is not None:
+        temp_path = "temp_credentials.json"
+        with open(temp_path, "wb") as f:
+            f.write(uploaded_json.getbuffer())
         credentials = service_account.Credentials.from_service_account_file(
-            uploaded_json, scopes=["https://www.googleapis.com/auth/drive"]
+            temp_path, scopes=["https://www.googleapis.com/auth/drive"]
         )
         return build("drive", "v3", credentials=credentials)
+    else:
+        st.stop()
     else:
         st.stop()
 
