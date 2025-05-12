@@ -15,10 +15,14 @@ FOLDER_ID_DATOS = "1yeUnQepazTxoxPDu3NqLbZtu-_EL1AoA"
 FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"
 
 def build_service():
-    credentials = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/drive"]
-    )
-    return build("drive", "v3", credentials=credentials)
+    uploaded_json = st.file_uploader("🔐 Sube tu archivo de credenciales JSON", type="json")
+    if uploaded_json is not None:
+        credentials = service_account.Credentials.from_service_account_file(
+            uploaded_json, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build("drive", "v3", credentials=credentials)
+    else:
+        st.stop()
 
 def descargar_ultimo_archivo(service, file_name):
     results = service.files().list(q=f"name='{file_name}' and '{FOLDER_ID_DATOS}' in parents and trashed=false",
