@@ -12,8 +12,8 @@ st.set_page_config(layout="wide")
 st.title("Procesador de archivos MIA")
 
 # Autenticación con Google Drive usando secrets y carpetas específicas
-FOLDER_ID_DATOS = "TU_FOLDER_ID_DATOS"  # Carpeta para DatosCombinados.xlsx
-FOLDER_ID_RESPONSABLES = "TU_FOLDER_ID_RESPONSABLES"  # Carpeta para libros por Responsable
+FOLDER_ID_DATOS = "1yeUnQepazTxoxPDu3NqLbZtu-_EL1AoA"  # Carpeta para DatosCombinados.xlsx
+FOLDER_ID_RESPONSABLES = "12iRD0WDAc4GFvqO0y48_kXfr8b3QFC0X"  # Carpeta para libros por Responsable
 
 def autenticar_drive():
     gauth = GoogleAuth()
